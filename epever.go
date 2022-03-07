@@ -40,13 +40,13 @@ type statusChargingStatusType int
 
 const (
 	NoCharging statusChargingStatusType = iota
-	FloatCharging
-	BoostCharging
-	EqualizationCharging
+	FaultCharging
+	PromoteCharging
+	EqualibriumCharging
 )
 
 func (me statusChargingStatusType) String() string {
-	return [...]string{"NoCharging", "FloatCharging", "BoostCharging", "EqualizationCharging"}[me]
+	return [...]string{"NoCharging", "Fault", "PromoteCharging", "EqualibriumCharging"}[me]
 }
 
 type statusChargingInputVoltStatusType int
@@ -102,9 +102,8 @@ type Epever struct {
 
 	statusCharging                         uint16
 	statusChargingRunning                  bool
-	statusChargingFault                    bool
 	statusChargingStatus                   statusChargingStatusType
-	statusChargingPVInputShort             bool
+	statusChargingLoadOpenCircuit          bool
 	statusChargingLoadMosfetShort          bool
 	statusChargingLoadShort                bool
 	statusChargingLoadOverCurrent          bool
@@ -129,6 +128,35 @@ type Epever struct {
 
 	batteryNetVoltage float64
 	batteryNetCurrent float64
+
+	// TODO
+	batteryConfigBatteryType uint16
+	batteryConfigCapacity    uint16
+
+	batteryConfigTempCoef                          float64
+	batteryConfigOverVoltDisconnect                float64
+	batteryConfigChargingLimitVoltage              float64
+	batteryConfigOverVoltageReconnect              float64
+	batteryConfigEqualizeChargingVoltage           float64
+	batteryConfigBoostChargingVoltage              float64
+	batteryConfigFloatChargingVoltage              float64
+	batteryConfigBoostReconnectChargingVoltage     float64
+	batteryConfigLowVoltageReconnectVoltage        float64
+	batteryConfigUnderVoltageWarningRecoverVoltage float64
+	batteryConfigUnderVoltageWarningVoltage        float64
+	batteryConfigLowVoltageDisconnectVoltage       float64
+	batteryConfigDischargingLimitVoltage           float64
+
+	chargeEqualizationDuration uint16
+	chargeBoostDuration        uint16
+	chargeEqualizePeriodDays   uint16
+
+	RTCsec   uint16
+	RTCmin   uint16
+	RTChour  uint16
+	RTCday   uint16
+	RTCmonth uint16
+	RTCyear  uint16
 }
 
 func (e *Epever) String() string {
@@ -147,11 +175,8 @@ func (e *Epever) String() string {
 	if e.statusChargingRunning {
 		chargingStatus = fmt.Sprintf("%s%s", chargingStatus, " Running")
 	}
-	if e.statusChargingFault {
-		chargingStatus = fmt.Sprintf("%s%s", chargingStatus, " Fault")
-	}
-	if e.statusChargingPVInputShort {
-		chargingStatus = fmt.Sprintf("%s%s", chargingStatus, " PVInputShort")
+	if e.statusChargingLoadOpenCircuit {
+		chargingStatus = fmt.Sprintf("%s%s", chargingStatus, " LoadOpenCircuit")
 	}
 	if e.statusChargingLoadMosfetShort {
 		chargingStatus = fmt.Sprintf("%s%s", chargingStatus, " LoadMosfetShort")
@@ -195,7 +220,44 @@ func (e *Epever) String() string {
 	hGenerated := fmt.Sprintf("Generated %.2fkwh Day %.2fkwh Mon %.2fkwh Year %.2fkwh Total", e.histGeneratedToday, e.histGeneratedMonth, e.histGeneratedYear, e.histGenerated)
 	hConsumed := fmt.Sprintf("Consumed %.2fkwh Day %.2fkwh Mon %.2fkwh Year %.2fkwh Total", e.histConsumedToday, e.histConsumedMonth, e.histConsumedYear, e.histConsumed)
 
-	return fmt.Sprintf("EPEVER\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n", rInput, rBattery, chargeData, batteryData, loadData, tempData, hConsumed, hGenerated)
+	batConfig := fmt.Sprintf(" - OverVolt(Disconnect %.2f Reconnect %.2f)\n"+
+		" - LowVoltage(Disconnect %.2f Reconnect %.2f)\n"+
+		" - UnderVolt(Warning %.2f Recover %.2f)\n"+
+		" - Charge(boost %.2f float %.2f equalize %.2f)\n"+
+		" - ChargingLimit %.2f BoostReconnect %.2f DischargingLimit %.2f\n"+
+		" - BatteryConfig %d (USR/SEAL/GEL/FLOOD) Capacity %dAh",
+		e.batteryConfigOverVoltDisconnect,
+		e.batteryConfigOverVoltageReconnect,
+		e.batteryConfigLowVoltageDisconnectVoltage,
+		e.batteryConfigLowVoltageReconnectVoltage,
+		e.batteryConfigUnderVoltageWarningVoltage,
+		e.batteryConfigUnderVoltageWarningRecoverVoltage,
+		e.batteryConfigBoostChargingVoltage,
+		e.batteryConfigFloatChargingVoltage,
+		e.batteryConfigEqualizeChargingVoltage,
+		e.batteryConfigChargingLimitVoltage,
+		e.batteryConfigBoostReconnectChargingVoltage,
+		e.batteryConfigDischargingLimitVoltage,
+
+		e.batteryConfigBatteryType,
+		e.batteryConfigCapacity,
+	)
+
+	chargeConfig := fmt.Sprintf("ChargeConfig Equalization %d mins boost %d mins. Equalization period %d days",
+		e.chargeEqualizationDuration,
+		e.chargeBoostDuration,
+		e.chargeEqualizePeriodDays,
+	)
+
+	dateTime := fmt.Sprintf("RTC %4d-%2d-%2d %2d:%2d:%2d",
+		e.RTCyear,
+		e.RTCmonth,
+		e.RTCday,
+		e.RTChour,
+		e.RTCmin,
+		e.RTCsec)
+
+	return fmt.Sprintf("EPEVER %s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n", dateTime, rInput, rBattery, chargeData, batteryData, loadData, tempData, hConsumed, hGenerated, batConfig, chargeConfig)
 }
 
 var (
@@ -345,21 +407,63 @@ var (
 		Help: "TODO",
 	})
 
-/*
-	statusCharging                         uint16
-	statusChargingRunning                  bool
-	statusChargingFault                    bool
-	statusChargingStatus                   statusChargingStatusType
-	statusChargingPVInputShort             bool
-	statusChargingLoadMosfetShort          bool
-	statusChargingLoadShort                bool
-	statusChargingLoadOverCurrent          bool
-	statusChargingInputOverCurrent         bool
-	statusChargingAntiReverseMosfetShort   bool
-	statusChargingOrAntiReverseMosfetShort bool
-	statusChargingMosfetShort              bool
-	statusChargingInputVoltStatus          statusChargingInputVoltStatusType
-*/
+	statChargingRunning = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_running",
+		Help: "TODO",
+	})
+	statChargingLoadOpenCircuit = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_load_open_circuit",
+		Help: "TODO",
+	})
+	statChargingLoadMosfetShort = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_load_mosfet_short",
+		Help: "TODO",
+	})
+	statChargingLoadShort = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_load_short",
+		Help: "TODO",
+	})
+	statChargingLoadOverCurrent = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_load_over_current",
+		Help: "TODO",
+	})
+	statChargingInputOverCurrent = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_input_over_current",
+		Help: "TODO",
+	})
+	statChargingAntiReverseMosfetShort = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_anti_reverse_mosfet_short",
+		Help: "TODO",
+	})
+	statChargingOrAntiReverseMosfetShort = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_or_anti_reverse_mosfet_short",
+		Help: "TODO",
+	})
+	statChargingMosfetShort = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_mosfet_short",
+		Help: "TODO",
+	})
+	statChargingStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_status",
+		Help: "TODO",
+	})
+	statChargingInputVoltStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "status_charging_input_volt_status",
+		Help: "TODO",
+	})
+
+	configEqualizationDuration = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "solar_config_equalization_duration",
+		Help: "TODO",
+	})
+	configBoostDuration = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "solar_config_boost_duration",
+		Help: "TODO",
+	})
+	configEqualizationPeriod = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "solar_config_equalization_period",
+		Help: "TODO",
+	})
 )
 
 // PushMetrics to prometheus
@@ -409,6 +513,59 @@ func (e *Epever) PushMetrics() {
 	statBatteryTemp.Set(float64(e.statusBatteryTemp))
 	statBatteryVolt.Set(float64(e.statusBatteryVolt))
 
+	statChargingStatus.Set(float64(e.statusChargingStatus))
+	statChargingInputVoltStatus.Set(float64(e.statusChargingInputVoltStatus))
+
+	if e.statusChargingRunning {
+		statChargingRunning.Set(1)
+	} else {
+		statChargingRunning.Set(0)
+	}
+	if e.statusChargingLoadOpenCircuit {
+		statChargingLoadOpenCircuit.Set(1)
+	} else {
+		statChargingLoadOpenCircuit.Set(0)
+	}
+	if e.statusChargingLoadMosfetShort {
+		statChargingLoadMosfetShort.Set(1)
+	} else {
+		statChargingLoadMosfetShort.Set(0)
+	}
+	if e.statusChargingLoadShort {
+		statChargingLoadShort.Set(1)
+	} else {
+		statChargingLoadShort.Set(0)
+	}
+	if e.statusChargingLoadOverCurrent {
+		statChargingLoadOverCurrent.Set(1)
+	} else {
+		statChargingLoadOverCurrent.Set(0)
+	}
+	if e.statusChargingInputOverCurrent {
+		statChargingInputOverCurrent.Set(1)
+	} else {
+		statChargingInputOverCurrent.Set(0)
+	}
+	if e.statusChargingAntiReverseMosfetShort {
+		statChargingAntiReverseMosfetShort.Set(1)
+	} else {
+		statChargingAntiReverseMosfetShort.Set(0)
+	}
+	if e.statusChargingOrAntiReverseMosfetShort {
+		statChargingOrAntiReverseMosfetShort.Set(1)
+	} else {
+		statChargingOrAntiReverseMosfetShort.Set(0)
+	}
+	if e.statusChargingMosfetShort {
+		statChargingMosfetShort.Set(1)
+	} else {
+		statChargingMosfetShort.Set(0)
+	}
+
+	configEqualizationDuration.Set(float64(e.chargeEqualizationDuration))
+	configEqualizationPeriod.Set(float64(e.chargeEqualizePeriodDays))
+	configBoostDuration.Set(float64(e.chargeBoostDuration))
+
 }
 
 // Create a new Epever
@@ -441,6 +598,7 @@ func (e *Epever) Connect() {
 		fmt.Printf("Error connecting. Waiting... %v\n", err)
 		time.Sleep(10 * time.Second)
 	}
+
 }
 
 // Read some input registers and reconnect/retry if needed.
@@ -454,6 +612,22 @@ func (e *Epever) readWithRetry(address uint16, quantity uint16) (results []byte)
 			return data
 		} else {
 			fmt.Printf("Error readWithRetry: %x - %v\n", address, err)
+			e.Connect()
+		}
+	}
+}
+
+// Read some input registers and reconnect/retry if needed.
+func (e *Epever) readHoldingWithRetry(address uint16, quantity uint16) (results []byte) {
+	for {
+		if e.client == nil {
+			e.Connect()
+		}
+		data, err := e.client.ReadHoldingRegisters(address, quantity)
+		if err == nil {
+			return data
+		} else {
+			fmt.Printf("Error readHoldingWithRetry: %x - %v\n", address, err)
 			e.Connect()
 		}
 	}
@@ -516,8 +690,9 @@ func (e *Epever) Refresh() error {
 	e.statusCharging = binary.BigEndian.Uint16(statuses[2:])
 
 	e.statusChargingRunning = (e.statusCharging & 1) == 1
-	e.statusChargingFault = ((e.statusCharging >> 1) & 1) == 1
-	e.statusChargingPVInputShort = ((e.statusCharging >> 4) & 1) == 1
+
+	e.statusChargingLoadOpenCircuit = ((e.statusCharging >> 5) & 1) == 1
+
 	e.statusChargingLoadMosfetShort = ((e.statusCharging >> 7) & 1) == 1
 	e.statusChargingLoadShort = ((e.statusCharging >> 8) & 1) == 1
 	e.statusChargingLoadOverCurrent = ((e.statusCharging >> 9) & 1) == 1
@@ -525,6 +700,7 @@ func (e *Epever) Refresh() error {
 	e.statusChargingAntiReverseMosfetShort = ((e.statusCharging >> 11) & 1) == 1
 	e.statusChargingOrAntiReverseMosfetShort = ((e.statusCharging >> 12) & 1) == 1
 	e.statusChargingMosfetShort = ((e.statusCharging >> 13) & 1) == 1
+
 	e.statusChargingInputVoltStatus = statusChargingInputVoltStatusType((e.statusCharging >> 14) & 0b11)
 	e.statusChargingStatus = statusChargingStatusType((e.statusCharging >> 2) & 0b11)
 
@@ -557,6 +733,54 @@ func (e *Epever) Refresh() error {
 	e.batteryNetVoltage = float64(binary.BigEndian.Uint16(batteryNetData)) / 100
 	e.batteryNetCurrent = float64(uint32(binary.BigEndian.Uint16(batteryNetData[2:]))|
 		(uint32(binary.BigEndian.Uint16(batteryNetData[4:]))<<16)) / 100
+
+	batteryConfigData := e.readHoldingWithRetry(REGBatteryType, 15)
+
+	e.batteryConfigBatteryType = binary.BigEndian.Uint16(batteryConfigData)  // 9000
+	e.batteryConfigCapacity = binary.BigEndian.Uint16(batteryConfigData[2:]) // 9001
+
+	e.batteryConfigTempCoef = float64(binary.BigEndian.Uint16(batteryConfigData[4:])) / 100                           // 9002
+	e.batteryConfigOverVoltDisconnect = float64(binary.BigEndian.Uint16(batteryConfigData[6:])) / 100                 // 9003
+	e.batteryConfigChargingLimitVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[8:])) / 100               // 9004
+	e.batteryConfigOverVoltageReconnect = float64(binary.BigEndian.Uint16(batteryConfigData[10:])) / 100              // 9005
+	e.batteryConfigEqualizeChargingVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[12:])) / 100           // 9006
+	e.batteryConfigBoostChargingVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[14:])) / 100              // 9007
+	e.batteryConfigFloatChargingVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[16:])) / 100              // 9008
+	e.batteryConfigBoostReconnectChargingVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[18:])) / 100     // 9009
+	e.batteryConfigLowVoltageReconnectVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[20:])) / 100        // 900a
+	e.batteryConfigUnderVoltageWarningRecoverVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[22:])) / 100 // 900b
+	e.batteryConfigUnderVoltageWarningVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[24:])) / 100        // 900c
+	e.batteryConfigLowVoltageDisconnectVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[26:])) / 100       // 900d
+	e.batteryConfigDischargingLimitVoltage = float64(binary.BigEndian.Uint16(batteryConfigData[28:])) / 100           // 900e
+
+	e.chargeEqualizationDuration = binary.BigEndian.Uint16(e.readHoldingWithRetry(REGBatteryEqualizeDuration, 1))
+	e.chargeBoostDuration = binary.BigEndian.Uint16(e.readHoldingWithRetry(REGBatteryBoostDuration, 1))
+	e.chargeEqualizePeriodDays = binary.BigEndian.Uint16(e.readHoldingWithRetry(REGBatteryEqualizePeriodDays, 1))
+
+	rtcData := e.readHoldingWithRetry(REGRTCSecMin, 3)
+
+	e.RTCsec = uint16(rtcData[1])
+	e.RTCmin = uint16(rtcData[0])
+
+	e.RTChour = uint16(rtcData[3])
+	e.RTCday = uint16(rtcData[2])
+
+	e.RTCmonth = uint16(rtcData[5])
+	e.RTCyear = uint16(rtcData[4])
+
+	/*
+	   const REGBatteryRatedVoltage = 0x9067
+	   const REGBatteryDischarge = 0x906d
+	   const REGBatteryChargeDepth = 0x906e
+	   const REGBatteryChargingMode = 0x9070
+
+	   const REGBatteryEqualizePeriodDays = 0x9016
+
+	   // RTC
+	   const REGRTCSecMin = 0x9013
+	   const REGRTCHourDay = 0x9014
+	   const REGRTCMonthYear = 0x9015
+	*/
 
 	return nil
 }

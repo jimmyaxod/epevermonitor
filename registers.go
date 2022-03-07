@@ -71,6 +71,53 @@ const REGBatteryStatus = 0x3200
 const REGChargingStatus = 0x3201
 const REGDischargingStatus = 0x3202
 
+/*
+D15
+-
+D14: 00
+H
+normal, 01
+H
+low
+,
+02H High, 03H
+no access
+Input volt error.
+D13
+-
+D12
+:
+output power
+:00
+-
+light
+load,01
+-
+moderate,02
+-
+rated,03
+-
+overlo
+ad
+D11:
+short circuit
+D10:
+unable to discharge
+D9:
+unable to stop discharging
+D8:
+output voltage abnormal
+D7:
+input overpressure
+D6: high
+voltage side short circuit
+D5: boost overpressure
+D4:
+output overpressure
+D1: 0 Normal, 1 Fault.
+D0: 1 Running, 0 Standby
+*/
+
 // ====
 // 33xx
 const REGBatteryVoltageTodayMax = 0x3302
@@ -112,6 +159,7 @@ const REGBatteryUnderVoltageWarningRecoverVoltage = 0x900b
 const REGBatteryUnderVoltageWarningVoltage = 0x900c
 const REGBatteryLowVoltageDisconnectVoltage = 0x900d
 const REGBatteryDischargingLimitVoltage = 0x900e
+
 const REGBatteryRatedVoltage = 0x9067
 const REGBatteryEqualizeDuration = 0x906b
 const REGBatteryBoostDuration = 0x906c

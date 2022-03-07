@@ -9,8 +9,8 @@ import (
 )
 
 // Some configuration consts we'll expose as metrics
-const SOLAR_CONFIG_PANEL_NUM = 4
-const SOLAR_CONFIG_MAX_POWER = 400
+const SOLAR_CONFIG_PANEL_NUM = 6
+const SOLAR_CONFIG_MAX_POWER = 600
 const SOLAR_CONFIG_BATTERY_NUM = 2
 
 // main
